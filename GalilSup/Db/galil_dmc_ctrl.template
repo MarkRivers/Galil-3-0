@@ -396,6 +396,7 @@ record(ao,"$(P)OC1START_CMD")
 	field(DTYP, "asynFloat64")
 	field(OUT,  "@asyn($(PORT),0)OUTPUT_COMPARE_START")
 	field(FLNK, "$(P)OC1START_MON")
+	info(asyn:READBACK, "1")
 }
 
 record(ai,"$(P)OC1INCR_MON")
@@ -416,6 +417,7 @@ record(ao,"$(P)OC1INCR_CMD")
 	field(DTYP, "asynFloat64")
 	field(OUT,  "@asyn($(PORT),0)OUTPUT_COMPARE_INCR")
 	field(FLNK, "$(P)OC1INCR_MON")
+	info(asyn:READBACK, "1")
 }
 
 record(mbbi,"$(P)OC1AXIS_STATUS")
@@ -452,6 +454,7 @@ record(mbbo,"$(P)OC1AXIS_CMD")
 	field(FRVL, "4")
 	field(OUT,  "@asyn($(PORT),0)OUTPUT_COMPARE_AXIS")
 	field(FLNK, "$(P)OC1AXIS_STATUS")
+	info(asyn:READBACK, "1")
 }
 
 record(ai,"$(P)OC2START_MON")
@@ -472,6 +475,7 @@ record(ao,"$(P)OC2START_CMD")
 	field(PINI, "YES")
 	field(OUT,  "@asyn($(PORT),1)OUTPUT_COMPARE_START")
 	field(FLNK, "$(P)OC2START_MON")
+	info(asyn:READBACK, "1")
 }
 
 record(ai,"$(P)OC2INCR_MON")
@@ -492,6 +496,7 @@ record(ao,"$(P)OC2INCR_CMD")
 	field(DTYP, "asynFloat64")
 	field(OUT,  "@asyn($(PORT),1)OUTPUT_COMPARE_INCR")
 	field(FLNK, "$(P)OC2INCR_MON")
+	info(asyn:READBACK, "1")
 }
 
 record(mbbi,"$(P)OC2AXIS_STATUS")
@@ -528,6 +533,7 @@ record(mbbo,"$(P)OC2AXIS_CMD")
 	field(FRVL, "4")
 	field(OUT,  "@asyn($(PORT),1)OUTPUT_COMPARE_AXIS")
 	field(FLNK, "$(P)OC2AXIS_STATUS")
+	info(asyn:READBACK, "1")
 }
 
 record(waveform,"$(P)OCMESSAGE_MON")
