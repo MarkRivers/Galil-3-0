@@ -232,6 +232,7 @@ public:
   asynStatus setDGain(double dGain);
   asynStatus setClosedLoop(bool closedLoop);
   asynStatus initializeProfile(size_t maxProfilePoints);
+  asynStatus enablePCO(bool enable);
 
   virtual ~GalilAxis();
 

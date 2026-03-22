@@ -3374,3 +3374,33 @@ void GalilAxis::axisStatusShutdown()
   }
 }
 
+/*
+ * Enable/disable position compare output
+ * Galil does not support endPosition or pulseWidth;
+ */
+ asynStatus GalilAxis::enablePCO(bool enable)
+ {
+   double startPosition, increment;
+   int oc, ocAxis=0;
+  
+   // Disabling output compare is done by setting ocAxis to 0
+   oc = (axisNo_ < 4) ? 0 : 1; 
+   if (enable) {
+     if (oc == 0) {
+       ocAxis = axisNo_ + 1;
+     } else {
+       ocAxis = axisNo_ - 3;
+     }
+  }
+  pC_->setIntegerParam(oc, pC_->GalilOutputCompareAxis_, ocAxis);
+  if (enable) {
+    pC_->getDoubleParam(axisNo_, pC_->PCOStartPosition_, &startPosition);
+    pC_->getDoubleParam(axisNo_, pC_->PCOIncrement_,     &increment);
+    pC_->setDoubleParam(oc,      pC_->GalilOutputCompareStart_, startPosition);
+    pC_->setDoubleParam(oc,      pC_->GalilOutputCompareIncr_,  increment);
+  }
+  //printf("GalilAxis::enablePCO calling setOutputCompare, startPosition=%f, increment=%f, oc=%d, ocAxis=%d, enable=%d\n",
+  //       startPosition, increment, oc, ocAxis, enable);
+  pC_->setOutputCompare(oc);
+  return asynSuccess;
+}
