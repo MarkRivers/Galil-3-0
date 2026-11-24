@@ -1,7 +1,7 @@
 
 file {
-	name="/home/ics/Galil/GalilSup/op/adl/galil_dmc_ctrl.adl"
-	version=030120
+	name="/home/epics/devel/Galil-4-0-2/GalilSup/op/adl/galil_dmc_ctrl.adl"
+	version=030117
 }
 display {
 	object {
@@ -1411,6 +1411,11 @@ text {
 	display[2] {
 		label="All extras"
 		name="galil_extras_8.adl"
+		args="P=$(DMC), M1=$(M1), M2=$(M2), M3=$(M3), M4=$(M4), M5=$(M5), M6=$(M6), M7=$(M7), M8=$(M8)"
+	}
+	display[3] {
+		label="All position compare"
+		name="GalilPositionCompare8.adl"
 		args="P=$(DMC), M1=$(M1), M2=$(M2), M3=$(M3), M4=$(M4), M5=$(M5), M6=$(M6), M7=$(M7), M8=$(M8)"
 	}
 	clr=14
