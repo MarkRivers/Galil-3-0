@@ -473,6 +473,14 @@
 //                  Update screen start scripts.  Update comments in DMC01Configure.cmd and DMC01CreateMonitorSet.cmd
 // 22/01/2026 A.Al-Dalleh
 //                  Changed textbox format to string in F and R kinematics UI
+// 01/05/2026 M. Rivers
+//                  Fix motorsAtStart startp index.  motorsAtStart was looking at the wrong index when checking if motors were at start
+// 21/05/2026 A.Al-Dalleh
+//                  Alter GalilAxis::setBrake so the brake is only released on connected motors
+// 26/08/2026 M.Clift and M.DavidSaver
+//                  Heap optimization review
+// 05/11/2026 M.Clift
+//                  Remove leading spaces in command responses
 
 #include <stdio.h>
 #include <math.h>
@@ -485,6 +493,7 @@
 #else
 #include <unistd.h>
 #endif /* _WIN32 */
+#include <cstdint>
 #include <iostream>  //cout
 #include <fstream>   //ifstream
 #include <sstream> //format source keys, string stream
@@ -512,7 +521,7 @@ using namespace std; //cout ostringstream vector string
 #include <epicsExport.h>
 
 static const char *driverName = "GalilController";
-static const char *driverVersion = "4-1-13";
+static const char *driverVersion = "4-1-17";
 
 static void GalilProfileThreadC(void *pPvt);
 static void GalilArrayUploadThreadC(void *pPvt);
@@ -1152,8 +1161,13 @@ void GalilController::setParamDefaults(void)
   setIntegerParam(GalilBISSCapable_, 0);
   //PVT capable
   setIntegerParam(GalilPVTCapable_, 0);
+  //EtherCat capable
+  setIntegerParam(GalilEtherCatCapable_, 0);
+
   //Communication status
   setIntegerParam(GalilCommunicationError_, 1);
+  // User Array upload status
+  setIntegerParam(GalilUserArrayUpload_, 0);
 
   //Deferred moves off 
   setIntegerParam(motorDeferMoves_, 0);
@@ -2001,7 +2015,7 @@ asynStatus GalilController::buildProfileFile()
 
            //Check profile velocity less than mr vmax for this motor
            if (fabs(velocity[j]) > fabs(maxAllowedVelocity[j])) {
-              mesg = "Seg " + tsp(i) + ": Velocity too high motor " + string(1, pAxis->axisName_) + " ";
+              mesg = string("Seg ") + tsp(i) + ": Velocity too high motor " + pAxis->axisName_ + ' ';
               mesg += tsp(fabs(velocity[j]*mres), 2) + " > " + tsp(maxAllowedVelocity[j]*mres, 2);
               mesg += ", increase time, check profile";
               buildOK = false;
@@ -2049,8 +2063,8 @@ asynStatus GalilController::buildProfileFile()
            }
            else {
               //PVT mode
-              moves += tsp(profileTimes_[i]) + " " + tsp(rint(incmove),0) + ",";
-              moves += tsp(velocity[j],0) + "," + tsp(rint(profileTimes_[i]*1000.0*timeMultiplier_),0) + '\n';
+              moves += tsp(profileTimes_[i]) + ' ' + tsp(rint(incmove),0) + ',';
+              moves += tsp(velocity[j],0) + ',' + tsp(rint(profileTimes_[i]*1000.0*timeMultiplier_),0) + '\n';
               //Check timebase is multiple of 2ms
               temp_time = profileTimes_[i] * 1000.0;
               //PVT has 2 sample minimum
@@ -3554,12 +3568,14 @@ asynStatus GalilController::setDeferredMoves(bool deferMoves)
   * \param[in] axisNo is asyn Param list number 0 - 7.  Controller wide values use list 0 */
 asynStatus GalilController::get_integer(int function, epicsInt32 *value, int axisNo = 0)
 {
-  asynStatus status;				 //Communication status.
-	
+  asynStatus status = asynSuccess;  //Communication status.
+  // Attempt to obtain value from controller
   if ((status = sync_writeReadController()) == asynSuccess)
      *value = (epicsInt32)atoi(resp_);
-  else    //Comms error, return last ParamList value set using setIntegerParam
-     getIntegerParam(axisNo, function, value);
+  else {
+     // Comms error, return last ParamList value set using setIntegerParam
+     status = getIntegerParam(axisNo, function, value);
+  }
   return status;
 }
 
@@ -5684,9 +5700,32 @@ asynStatus GalilController::sync_writeReadController(bool testQuery, bool logCom
   cmd_[len] = '\0';
 
   //Remove any unwanted characters
-  string resp = resp_;
-  resp.erase(resp.find_last_not_of(" \n\r\t:")+1);
-  strcpy(resp_, resp.c_str());
+  if (resp_ && resp_[0] != '\0') {
+    // 1. Find the first non-space character
+    char *start = resp_;
+    while (*start == ' ') {
+      start++;
+    }
+    
+    // 2. If there are leading spaces, shift the string over
+    size_t len = 0;
+    if (start != resp_) {
+      len = strlen(start);
+      memmove(resp_, start, len + 1); // +1 to copy the null terminator ('\0')
+    } else {
+      // If we didn't shift, we still need the length for the next step
+      len = strlen(resp_);
+    }
+    
+    // 3. Remove unwanted trailing characters (using our calculated 'len')
+    if (len > 0) {
+      char *end = resp_ + len - 1;
+      while (end >= resp_ && (*end == ' ' || *end == '\n' || *end == '\r' || *end == '\t' || *end == ':')) {
+        end--;
+      }
+      *(end + 1) = '\0';
+    }
+  }
 
   //Debugging
   /*asynPrint(this->pasynUserSelf, ASYN_TRACEIO_DRIVER, 
@@ -5716,97 +5755,103 @@ asynStatus GalilController::sync_writeReadController(bool testQuery, bool logCom
   * \param[out] timeout Timeout before returning an error.*/
 asynStatus GalilController::sync_writeReadController(const char *output, char *input, size_t maxChars, size_t *nread, double timeout)
 {
-  unsigned i = 0;	//Number of raw bytes received, general counting
-  unsigned j = 0;	//Number of unsolicited bytes received
-  unsigned k = 0;	//Number of solicited bytes received
-  size_t nwrite;	//Bytes written
-  asynStatus status = asynSuccess;//Asyn status
-  int eomReason;	//End of message reason
-  char buf[MAX_GALIL_DATAREC_SIZE] = "";	//Receive buffer
-  char mesg[MAX_GALIL_DATAREC_SIZE] = "";	//Unsolicited buffer
-  char resp[MAX_GALIL_DATAREC_SIZE] = "";	//Solicited buffer
-  string inp = "";                          //Solicited data concatenated over multiple reads				
-				//Sometimes caller puts many commands on one line separated by ; so we must
-  string out_string = output;	//Determine number of output terminators to search for from requested command
-  int target_terminators = (int)count(out_string.begin(), out_string.end(), ';') + 1;
-  int found_terminators = 0;	//Terminator characters found so far
-  unsigned char value;		//Used to identify unsolicited traffic
-  bool done = false;		//Read complete?
+    // Pointer safety & bounds checks
+    if (!output || !input || maxChars == 0) {
+        return asynError;
+    }
 
-  //Null user supplied input buffer
-  strcpy(input, "");
-  //Set timeout for Sync connection
-  pasynUserSyncGalil_->timeout = timeout_;
-  //Write the command
-  status = pSyncOctet_->write(pSyncOctetPvt_, pasynUserSyncGalil_, output, strlen(output), &nwrite);
-  //If write ok
-  if (!status)
-     {
-     while (!done)
-        {
-        //Read any response
-        status = pSyncOctet_->read(pSyncOctetPvt_, pasynUserSyncGalil_, buf, MAX_GALIL_DATAREC_SIZE, nread, &eomReason);
-        //If read successful, search for terminator characters
-        if (!status && *nread > 0)
-           {
-           //Search for terminating characters
-           for (i = 0; i < *nread; i++)
-              {
-              //Controller responds with ? or : for each command separated by ;
-              if (buf[i] == '?')
-                 {
-                 //Look for command fail prompts
-                 found_terminators++;
-                 //Controller could not honour command
-                 status = asynError;
-                 }
-              //Look for command success prompts
-              if (buf[i] == ':')
-                 found_terminators++;
-              //Split received byte stream into solicited, and unsolicited messages
-              //Unsolicited messages are received here only in synchronous mode
-              value = (unsigned char)buf[i] - 128;
-              if (((buf[i] & 0x80) == 0x80) && (isprintable((int)value)))
-                 {
-                 //Byte looks like an unsolicited packet
-                 //Check for overrun
-                 if (j > MAX_GALIL_DATAREC_SIZE - 2)
-                    return asynError;//No unsolicited message should be this long return error
-                 //Copy potential unsolicited byte into mesg buffer
-                 mesg[j++] = (unsigned char)value;
-                 //Terminate the buffers
-                 mesg[j] = '\0';
-                 }
-              else
-                 {
-                 //Byte looks like a solicited packet
-                 //Check for overrun
-                 if (k > MAX_GALIL_DATAREC_SIZE - 2)
-                    return asynError;//No solicited message should be this long return error
-                 resp[k++] = buf[i];//Byte is part of solicited message
-                 //Terminate the buffer
-                 resp[k] = '\0';
-                 }
-              //If received all expected terminators, read is complete
-              if (found_terminators == target_terminators)
-                 {
-                 //Don't attempt any more reads
-                 done = true;
-                 //stop searching this read, and return the resp, then send unsolicited mesg
-                 break;
-                 }
-              }
-           }
-        else //Stop read if any asyn error
-           return asynError;
-        }//while (!done)
-     //Copy solicited response into user supplied buffer
-     strcpy(input, resp);
-     //Send unsolicited mesg to queue
-     if (j != 0)
+    // Default return outputs
+    input[0] = '\0';
+    if (nread) *nread = 0;
+
+    size_t out_len = strlen(output);
+    if (out_len == 0) {
+        return asynSuccess; // Nothing to write
+    }
+
+    // Count expected prompt responses (1 base + 1 per command separator)
+    int target_terminators = 1;
+    for (size_t idx = 0; idx < out_len; idx++) {
+        if (output[idx] == ';') {
+            target_terminators++;
+        }
+    }
+
+    size_t i = 0;
+    size_t j = 0; // Unsolicited index
+    size_t k = 0; // Solicited index
+    size_t nwrite = 0;
+    size_t chunk_bytes = 0;
+    asynStatus status = asynSuccess;
+    int eomReason = 0;
+
+    char buf[MAX_GALIL_DATAREC_SIZE];
+    char mesg[MAX_GALIL_DATAREC_SIZE];
+
+    int found_terminators = 0;
+    bool done = false;
+
+    // Set sync interface timeout using function parameter
+    pasynUserSyncGalil_->timeout = timeout;
+
+    // Write command block
+    status = pSyncOctet_->write(pSyncOctetPvt_, pasynUserSyncGalil_, output, out_len, &nwrite);
+    if (status != asynSuccess) {
+        return status;
+    }
+
+    while (!done) {
+        status = pSyncOctet_->read(pSyncOctetPvt_, pasynUserSyncGalil_, buf, sizeof(buf), &chunk_bytes, &eomReason);
+
+        if (status == asynSuccess && chunk_bytes > 0) {
+            for (i = 0; i < chunk_bytes; i++) {
+                char ch = buf[i];
+
+                if (ch == '?') {
+                    // Command error prompt from Galil
+                    found_terminators++;
+                    status = asynError;
+                } else if (ch == ':') {
+                    found_terminators++;
+                }
+
+                // Check for bit 7 set (unsolicited asynchronous data)
+                if ((static_cast<unsigned char>(ch) & 0x80) == 0x80) {
+                    unsigned char value = static_cast<unsigned char>(ch) - 128;
+                    if (isprintable(static_cast<int>(value))) {
+                        if (j >= sizeof(mesg) - 1) return asynError;
+                        mesg[j++] = static_cast<char>(value);
+                    }
+                } else {
+                    // Solicited data
+                    if (k >= maxChars - 1) return asynError;
+                    input[k++] = ch;
+                }
+
+                if (found_terminators == target_terminators) {
+                    done = true;
+                    break;
+                }
+            }
+        } else {
+            return (status != asynSuccess) ? status : asynError;
+        }
+    }
+
+    // Null terminate solicited data buffer
+    input[k] = '\0';
+
+    if (j > 0) {
+        // Null terminate unsolicited data buffer
+        mesg[j] = '\0';
         sendUnsolicitedMessage(mesg);
-     }//write ok
-  return status;
+    }
+
+    if (nread) {
+        *nread = k;
+    }
+
+    return status;
 }
 
 /** Writes a string to the controller and reads the response.
@@ -7012,7 +7057,7 @@ asynStatus GalilController::drvUserDestroy(asynUser *pasynUser)
 /** Record an error message, and also display to ioc window
   * \param[in] mesg      	 Error message
   */
-void GalilController::setCtrlError(string mesg)
+void GalilController::setCtrlError(const string &mesg)
 {
    if (mesg.size() > 0)
       std::cout << mesg << std::endl;
@@ -7086,40 +7131,53 @@ void GalilController::InitializeDataRecord(void)
      }
 }
 
-double GalilController::sourceValue(const std::vector<char>& record, const std::string& source)
+double GalilController::sourceValue(const vector<char>& record, const string& source)
 {
-	try
-	{
-		const Source& s = map.at(source); //use at() function so silent insert does not occur if bad source string is used.
-		int return_value = 0;
-		if (s.type[0] == 'U')  //unsigned
-			switch (s.type[1])
-		{
-			case 'B':  return_value = *(unsigned char*)(&record[s.byte]);  break;
-			case 'W':  return_value = *(unsigned short*)(&record[s.byte]);  break;
-			case 'L':  return_value = *(unsigned int*)(&record[s.byte]);  break;
-		}
-		else //s.type[0] == 'S'  //signed
-			switch (s.type[1])
-		{
-			case 'B':  return_value = *(char*)(&record[s.byte]);  break;
-			case 'W':  return_value = *(short*)(&record[s.byte]);  break;
-			case 'L':  return_value = *(int*)(&record[s.byte]);  break;
-		}
+    auto it = map.find(source);
+    if (it == map.end()) {
+        return 0.0;
+    }
 
-		if (s.bit >= 0) //this is a bit field
-		{
-			bool bTRUE = s.scale > 0; //invert logic if scale is <= 0  
-			return return_value & (1 << s.bit) ? bTRUE : !bTRUE; //check the bit
-		}
-		else
-			return (return_value / s.scale) + s.offset;
+    const Source& s = it->second;
 
-	}
-	catch (const std::out_of_range& e) //bad source
-	{
-		return 0.0;
-	}
+    // Determine bytes required
+    size_t bytes_needed = 1;
+    if (s.type[1] == 'W') {
+        bytes_needed = 2;
+    } else if (s.type[1] == 'L') {
+        bytes_needed = 4;
+    }
+
+    // Check for overrun
+    if (s.byte + bytes_needed > record.size()) {
+        return 0.0;
+    }
+
+    const char* ptr = &record[s.byte];
+    int64_t val = 0;
+
+    if (s.type[0] == 'U') {
+        switch (s.type[1]) {
+            case 'B': { uint8_t  v; memcpy(&v, ptr, sizeof(v)); val = v; break; }
+            case 'W': { uint16_t v; memcpy(&v, ptr, sizeof(v)); val = v; break; }
+            case 'L': { uint32_t v; memcpy(&v, ptr, sizeof(v)); val = v; break; }
+            default:  return 0.0;
+        }
+    } else {
+        switch (s.type[1]) {
+            case 'B': { int8_t  v; memcpy(&v, ptr, sizeof(v)); val = v; break; }
+            case 'W': { int16_t v; memcpy(&v, ptr, sizeof(v)); val = v; break; }
+            case 'L': { int32_t v; memcpy(&v, ptr, sizeof(v)); val = v; break; }
+            default:  return 0.0;
+        }
+    }
+
+    if (s.bit >= 0) {
+        bool bit_set = (val & (1ULL << s.bit)) != 0;
+        return (s.scale > 0) == bit_set ? 1.0 : 0.0;
+    }
+
+    return (static_cast<double>(val) / s.scale) + s.offset;
 }
 
 void GalilController::Init30010(bool dmc31010)

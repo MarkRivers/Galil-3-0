@@ -11,4 +11,3 @@ GALIL=$(SUPPORT)/Galil-4-0-2
 IPAC=$(SUPPORT)/ipac-2-16
 -include $(TOP)/../RELEASE.local
 -include $(TOP)/../RELEASE.$(EPICS_HOST_ARCH).local
-
