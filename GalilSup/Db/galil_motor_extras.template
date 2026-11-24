@@ -1611,4 +1611,7 @@ record(mbbo,"$(P)$(M)_ON_CMD")
 	field(FLNK, "$(P)$(M)_ON_STATUS")
 }
 
+# Position compare using standard records from motor app
+include "$(MOTOR)/db/positionCompare.template"
+
 #end

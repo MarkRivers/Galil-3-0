@@ -45,3 +45,5 @@ $(P)$(M)_AMPGAIN_CMD
 $(P)$(M)_AMPCLGAIN_CMD
 $(P)$(M)_AMPLC_SP
 $(P)$(M)_USERDATADEADB_SP
+
+file positionCompare_settings.req P=$(P), R=$(M)
